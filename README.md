@@ -271,6 +271,7 @@ import (
 )
 
 func main() {
+	// Create logger service
 	loggerService := logger.New(os.Stdout)
 }
 ```
@@ -288,14 +289,17 @@ import (
 )
 
 func main() {
-	loggerService := logger.New(
-		logger.NewConsole(
-			zerolog.ConsoleWriter{
-				Out:        os.Stdout,
-				TimeFormat: time.RFC3339,
-			},
-		),
-	)
+	// Define console logger settings
+	consoleLoggerSettings := zerolog.ConsoleWriter{
+		Out:        os.Stdout,
+		TimeFormat: time.RFC3339,
+	}
+
+	// Create console logger
+	consoleLogger := logger.NewConsole(consoleLoggerSettings)
+
+	// Create logger service
+	loggerService := logger.New(consoleLogger)
 }
 ```
 
@@ -310,17 +314,24 @@ import (
 )
 
 func main() {
-	client, _ := elasticsearch.NewClient(
-		elasticsearch.Config{
-			Addresses: []string{
-				"http://localhost:9200",
-			},
+	// Define elasticsearch config
+	elasticSearchConfig := elasticsearch.Config{
+		Addresses: []string{
+			"http://localhost:9200",
 		},
+	}
+
+	// Create elasticsearch client
+	client, err := elasticsearch.NewClient(elasticSearchConfig)
+
+	// Create elasticsearch logger
+	elasticsearchLogger := logger.NewElasticsearch(
+		client,	// client
+		"logs",	// index
 	)
 
-	loggerService := logger.New(
-		logger.NewElasticsearch(client, "logs"),
-	)
+	// Create logger service
+	loggerService := logger.New(elasticsearchLogger)
 }
 ```
 
@@ -503,7 +514,7 @@ func main() {
 	traceExporter := {...}
 
 	// Create metric exporter
-	metricExporter, _ := telemetry.NewMetricExporterPrometheus()
+	metricExporter, err := telemetry.NewMetricExporterPrometheus()
 
 	// Create telemetry service
 	telemetryService := telemetry.New("service", traceExporter, metricExporter)
