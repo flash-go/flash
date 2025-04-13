@@ -12,19 +12,45 @@ A high-performance web framework written in Go for building enterprise-grade dis
 
 ### Features
 
-- Extreme HTTP client/server performance built on the [FastHTTP](https://github.com/valyala/fasthttp). Zero memory allocations in hot paths. Up to 10x faster than net/http. Was designed for some high performance edge cases. Lightweight high performance HTTP request [router](https://github.com/fasthttp/router) with middleware support and zero memory allocations.
+- HTTP transport
+  - Extreme client/server performance built on the [FastHTTP](https://github.com/valyala/fasthttp)
+  - Zero memory allocations in hot paths
+  - Up to 10x faster than net/http
+  - Designed for high-performance edge cases
+  - Lightweight high performance HTTP [router](https://github.com/fasthttp/router)
+  - Outgoing requests to services with loadbalancer
+  - Middleware support
 
-- Log aggregation system based on [zerolog](https://github.com/rs/zerolog) with data export to Elasticsearch or other storage.
+- Log aggregation
+  - Based on [zerolog](https://github.com/rs/zerolog)
+  - Zero memory allocations
+  - Supports data export to
+    - io.Writer
+	- Console
+    - Elasticsearch
 
-- Distributed tracing system based on OpenTelemetry.
+- Distributed tracing and metrics
+  - Go Runtime metrics
+  - Incoming requests metrics
+  - Application-specific metrics
+  - Custom tracer exporters
+    - io.Writer
+	- OpenTelemetry collector (gRPC)
+  - Custom metric exporters
+    - io.Writer
+	- OpenTelemetry collector (gRPC)
+    - Prometheus
+  - Inject/extract tracers from requests
+  - Based on OpenTelemetry
 
-- Go Runtime and incoming request metrics collection with support for custom metrics to track application-specific data based on OpenTelemetry.
+- Service discovery and distributed KV storage
+  - Get/watch services and values by keys
+  - Get target service with loadbalancer
+  - Based on Consul
 
-- Service discovery and hot configuration updates via distributed KV storage on the Consul base.
+- Automatic Swagger documentation generation
 
-- Automatic Swagger documentation generation.
-
-- Support for pprof profiling.
+- Support for pprof profiling
 
 ### Install
 
@@ -750,7 +776,7 @@ func main() {
 		)
 
 		// Write response
-		err := ctx.WriteResponse(response) error
+		err := ctx.WriteResponse(response)
 	}
 
 	// Add route
@@ -765,6 +791,7 @@ func main() {
 ```
 
 A json object with http code 201 will be sent
+
 ```json
 {
     "status": "success",
@@ -814,7 +841,7 @@ func main() {
 
 ### Use state
 
-При запуске сервера выполняется регистрация инстанса в сторе. ID инстанса генерируется по шаблону [service]-http-[hostname]-[port]. В наименование сервиса добавляется постфикс "-http". Добавляется роут /health для мониторинга здоровья инстанса. Здоровье проверяется с интервалом 10 сек. Через 1 мин после падения инстанс удаляется. Инстанс удаляется моментально при остановке сервера.
+When the server is launched, the instance is registered in the store. The instance ID is generated using the template [service]-http-[hostname]-[port]. The postfix "-http" is added to the service name. The /health route is added to monitor the health of the instance. Health is checked at intervals of 10 seconds. The instance is deleted 1 minute after the crash. The instance is deleted immediately when the server is stopped.
 
 ```go
 package main
@@ -833,7 +860,7 @@ func main() {
 
 ### Use logger
 
-Включение логирования всех входящих запросов и системные уведомления от сервера.
+Enable logging of all incoming requests and system notifications from the server.
 
 ```go
 package main
@@ -852,7 +879,7 @@ func main() {
 
 ### Use telemetry
 
-Добавление поддержки базовых метрик и трейсинга.
+Adding support for basic metrics and tracing.
 
 | Metric Name         | Description                                    |
 |---------------------|------------------------------------------------|
@@ -860,7 +887,7 @@ func main() {
 | `requests_in_flight`| Current number of requests being processed     |
 | `request_duration`  | Histogram of response time for handler         |
 
-Для всех входящих запросов подхватывается traceparent (если передан) и создается спан "incoming request". Для "incoming request" привязывается path, method, status code. Контекст телеметрии доступен через req.Telemetry() в хендлерах.
+For all incoming requests, traceparent is picked up (if passed) and the "incoming request" span is created. For "incoming request", path, method, status code are bound. Telemetry context is available via req.Telemetry() in handlers.
 
 ```go
 package main
@@ -983,17 +1010,17 @@ func handler(ctx server.ReqCtx) {
 }
 ```
 
-После того как ты вынес handler в именованную функцию с аннотациями, теперь можно запускать генерацию Swagger-документации:
+Once you have extracted the handler into a named function with annotations, you can now start generating Swagger documentation.
 
 ```bash
-// Точка входа и хендлеры в корне
+// Entry point and handlers at the root
 swag init
 
-// Точка входа в cmd и хендлеры в internal
+// Entry point in cmd and handlers in internal
 swag init -d cmd,internal
 ```
 
-Документация будет доступна по адресу:
+The documentation will be available at
 
 ```
 http://localhost:8081/swagger/index.html
@@ -1247,7 +1274,7 @@ func main() {
 
 ### Use telemetry
 
-Для всех исходящих запросов создается спан "outgoing request" с атрибутом "url". Активация поддержки контекста телеметрии при исходящих запросах.
+For all outgoing requests, a span "outgoing request" is created with the attribute "url". Activation of support for telemetry context for outgoing requests.
 
 ```go
 package main
@@ -1266,7 +1293,7 @@ func main() {
 
 ### Use state
 
-Возможность использовать функцию ServiceRequest для отправки исходящих HTTP-запросов в сервисы по наименованию сервиса с использованием балансировки нагрузки.
+Ability to use the ServiceRequest function to send outgoing HTTP requests to services by service name using load balancing.
 
 ```go
 package main
@@ -1285,7 +1312,7 @@ func main() {
 
 ### Send requests
 
-Доступные методы для отправки запросов в пакете http
+Available methods for sending requests in http package
 
 ```go
 import "github.com/flash-go/flash/http"
@@ -1307,7 +1334,7 @@ const (
 )
 ```
 
-Отправка запроса и получение тела и кода ответа.
+Sending a request and receiving the body and response code.
 
 ```go
 package main
@@ -1337,7 +1364,7 @@ func main() {
 }
 ```
 
-Отправка запроса с дополнительными заголовками.
+Sending a request with additional headers.
 
 ```go
 package main
@@ -1369,7 +1396,7 @@ func main() {
 }
 ```
 
-Отправка запроса с json body.
+Sending request with json body.
 
 ```go
 package main
@@ -1385,7 +1412,7 @@ func main() {
 	httpClient := {...}
 
 	// Create body byte slice
-	body, _ := json.Marshal(
+	body, err := json.Marshal(
 		struct {
 			Name string `json:"name"`
 			ID   int    `json:"id"`
@@ -1416,7 +1443,7 @@ func main() {
 }
 ```
 
-Отправка запроса в сервис по наименованию сервиса с использованием балансировки нагрузки. Если предварительно не интегрировать стейт в клиент то функция возвращает ошибку.
+Sending a request to a service by service name using load balancing. If you do not integrate the state into the client beforehand, the function returns an error.
 
 ```go
 package main
@@ -1447,7 +1474,7 @@ func main() {
 }
 ```
 
-Отправка запроса в сервис из хендлера сервера с сохранением контекста телеметрии.
+Sending a request to a service from a server handler while preserving the telemetry context.
 
 ```go
 package main

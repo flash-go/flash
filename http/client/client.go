@@ -22,6 +22,9 @@ const (
 )
 
 type Client interface {
+	SetReadTimeout(d time.Duration) Client
+	SetWriteTimeout(d time.Duration) Client
+	SetMaxIdleConnDuration(d time.Duration) Client
 	UseTelemetry(telemetry telemetry.Telemetry) Client
 	UseState(state state.State) Client
 	Request(ctx context.Context, method string, url string, options ...RequestOption) (Response, error)
@@ -83,7 +86,7 @@ func (c *client) Request(ctx context.Context, method string, url string, options
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				errCh <- fmt.Errorf("panic in request: %v", r)
+				errCh <- fmt.Errorf("request error: %v", r)
 			}
 		}()
 		req := fasthttp.AcquireRequest()
