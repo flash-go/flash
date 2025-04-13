@@ -679,29 +679,33 @@ func main() {
 	httpServer := {...}
 
 	// Request handler
-	handler := func(req server.ReqCtx) {
+	handler := func(ctx server.ReqCtx) {
 		// Read json request body
-		req.ReadJson(data any) error
+		ctx.ReadJson(data any) error
 		// Read bytes request body
-		req.Body() []byte
+		ctx.Body() []byte
 		// Set KV to context
-		req.SetUserValue(key any, value any)
+		ctx.SetUserValue(key any, value any)
 		// Get KV from context
-		req.UserValue(key any) any
+		ctx.UserValue(key any) any
 		// Get telemetry context
-		req.Telemetry() context.Context
+		ctx.Telemetry() context.Context
 		// Set content-type header
-		req.SetContentType(contentType string)
+		ctx.SetContentType(contentType string)
 		// Set status code
-		req.SetStatusCode(statusCode int)
+		ctx.SetStatusCode(statusCode int)
 		// Write error response message with status code
-		req.Error(msg string, statusCode int)
+		ctx.Error(msg string, statusCode int)
 		// Write bytes response body
-		req.Write(p []byte) (int, error)
+		ctx.Write(p []byte) (int, error)
 		// Write string response body
-		req.WriteString(s string) (int, error)
+		ctx.WriteString(s string) (int, error)
 		// Write json response body
-		req.WriteJson(data any) error
+		ctx.WriteJson(data any) error
+		// Write default json response
+		ctx.WriteResponse(response *Response) error
+		// Create default json response
+		ctx.NewResponse(statusCode int, status, code string, data any) *Response
 	}
 
 	// Add route
@@ -712,6 +716,63 @@ func main() {
 		// middlewares (optional)
 		// ...
 	)
+}
+```
+
+#### Send json response
+
+```go
+package main
+
+import (
+	"github.com/flash-go/flash/http"
+	"github.com/flash-go/flash/http/server"
+)
+
+func main() {
+	// Create http server
+	httpServer := {...}
+
+	// Request handler
+	handler := func(ctx server.ReqCtx) {
+		// Create response
+		response := ctx.NewResponse(
+			201,							// http status code
+			"success",						// response status
+			"user_registered_successfully",	// response code
+			struct {						// optional response data (if no data then nil)
+				Id          int		`json:"id"`
+				Username	string	`json:"username"`
+			}{
+				1,		// id
+				"user",	// username
+			},
+		)
+
+		// Write response
+		err := ctx.WriteResponse(response) error
+	}
+
+	// Add route
+	httpServer.AddRoute(
+		http.MethodGet,	// Method
+		"/", 			// URI
+		handler,		// Handler
+		// middlewares (optional)
+		// ...
+	)
+}
+```
+
+A json object with http code 201 will be sent
+```json
+{
+    "status": "success",
+    "code": "user_registered_successfully",
+    "data": {
+        "id": 1,
+        "username": "user",
+    }
 }
 ```
 
@@ -734,8 +795,8 @@ func main() {
 
 	// Create middleware
 	middleware := func(handler server.ReqHandler) server.ReqHandler {
-		return func(req server.ReqCtx) {
-			handler(req)
+		return func(ctx server.ReqCtx) {
+			handler(ctx)
 		}
 	}
 
@@ -811,7 +872,7 @@ func main() {
 	// Create telemetry service
 	telemetryService := {...}
 	
-	// Use logger service
+	// Use telemetry service
 	httpServer.UseTelemetry(telemetryService)
 }
 ```
@@ -837,12 +898,12 @@ func main() {
 	httpServer.UseTelemetry(telemetryService)
 
 	// Request handler
-	handler := func(req server.ReqCtx) {
+	handler := func(ctx server.ReqCtx) {
 		// Get http telemetry tracer
 		tracer := telemetryService.Tracer("http")
 		// Start span with parse traceparent
-		ctx, span := tracer.Start(
-			req.Telemetry(),	// Telemetry context
+		tctx, span := tracer.Start(
+			ctx.Telemetry(),	// Telemetry context
 			"handler",			// Span name
 		)
 		// End span
@@ -850,7 +911,7 @@ func main() {
 		// Set attributes (optional)
 		span.SetAttributes(attribute.String("key", "value"))
 		// Send response
-		req.WriteString("index")
+		ctx.WriteString("index")
 	}
 
 	// Add route
@@ -866,16 +927,76 @@ func main() {
 
 ### Use Swagger
 
+Install Swag
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+```
+
 ```go
 package main
 
+// @title           flash
+// @version         1.0
+// @description     flash framework
+// @BasePath        /
+
+import (
+	"github.com/flash-go/flash/http"
+	"github.com/flash-go/flash/http/server"
+	_ "project/docs" // Import docs
+)
+
 func main() {
+	serviceName := "api"
+	instanceHostname := "localhost"
+	instancePort := 8081
+
 	// Create http server
 	httpServer := {...}
 
 	// Use Swagger
 	httpServer.UseSwagger()
+
+	// Add route
+	httpServer.AddRoute(
+		http.MethodGet,	// Method
+		"/", 			// URI
+		handler,		// Handler
+		// middlewares (optional)
+		// ...
+	)
+
+	// Start listen
+	<-httpServer.Listen(serviceName, instanceHostname, instancePort)
 }
+
+// PingExample godoc
+// @Summary      ping example
+// @Description  do ping
+// @Tags         example
+// @Accept       json
+// @Produce      json
+// @Router       /test [post]
+func handler(ctx server.ReqCtx) {
+	{...}
+}
+```
+
+После того как ты вынес handler в именованную функцию с аннотациями, теперь можно запускать генерацию Swagger-документации:
+
+```bash
+// Точка входа и хендлеры в корне
+swag init
+
+// Точка входа в cmd и хендлеры в internal
+swag init -d cmd,internal
+```
+
+Документация будет доступна по адресу:
+
+```
+http://localhost:8081/swagger/index.html
 ```
 
 ### Use profiling
@@ -1073,6 +1194,54 @@ import (
 func main() {
 	// Create http client
 	httpClient := client.New()
+}
+```
+
+### Set read timeout
+
+Default read timeout 10 sec.
+
+```go
+package main
+
+func main() {
+	// Create http client
+	httpClient := {...}
+
+	// Set read timeout
+	httpClient.SetReadTimeout(10 * time.Second)
+}
+```
+
+### Set write timeout
+
+Default write timeout 10 sec.
+
+```go
+package main
+
+func main() {
+	// Create http client
+	httpClient := {...}
+
+	// Set write timeout
+	httpClient.SetWriteTimeout(10 * time.Second)
+}
+```
+
+### Set max idle connection duration
+
+Defaultmax idle connection duration 1 hour.
+
+```go
+package main
+
+func main() {
+	// Create http client
+	httpClient := {...}
+
+	// Set max idle connection duration
+	httpClient.SetMaxIdleConnDuration(1 * time.Hour)
 }
 ```
 

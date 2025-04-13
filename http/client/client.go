@@ -15,6 +15,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const (
+	defaultReadTimeout         = 10 * time.Second
+	defaultWriteTimeout        = 10 * time.Second
+	defaultMaxIdleConnDuration = 1 * time.Hour
+)
+
 type Client interface {
 	UseTelemetry(telemetry telemetry.Telemetry) Client
 	UseState(state state.State) Client
@@ -31,9 +37,9 @@ type client struct {
 func New() Client {
 	return &client{
 		client: &fasthttp.Client{
-			ReadTimeout:                   500 * time.Millisecond,
-			WriteTimeout:                  500 * time.Millisecond,
-			MaxIdleConnDuration:           1 * time.Hour,
+			ReadTimeout:                   defaultReadTimeout,
+			WriteTimeout:                  defaultWriteTimeout,
+			MaxIdleConnDuration:           defaultMaxIdleConnDuration,
 			NoDefaultUserAgentHeader:      true, // Don't send: User-Agent: fasthttp
 			DisableHeaderNamesNormalizing: true, // If you set the case on your headers correctly you can enable this
 			DisablePathNormalizing:        true,
@@ -44,6 +50,21 @@ func New() Client {
 			}).Dial,
 		},
 	}
+}
+
+func (c *client) SetReadTimeout(d time.Duration) Client {
+	c.client.ReadTimeout = d
+	return c
+}
+
+func (c *client) SetWriteTimeout(d time.Duration) Client {
+	c.client.WriteTimeout = d
+	return c
+}
+
+func (c *client) SetMaxIdleConnDuration(d time.Duration) Client {
+	c.client.MaxIdleConnDuration = d
+	return c
 }
 
 func (c *client) UseTelemetry(telemetry telemetry.Telemetry) Client {

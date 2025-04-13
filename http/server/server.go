@@ -69,6 +69,15 @@ type ReqCtx interface {
 	Write(p []byte) (int, error)
 	WriteString(s string) (int, error)
 	WriteJson(data any) error
+	WriteResponse(response *Response) error
+	NewResponse(statusCode int, status, code string, data any) *Response
+}
+
+type Response struct {
+	StatusCode int
+	Status     string
+	Code       string
+	Data       any
 }
 
 type ReqHandler func(ReqCtx)
@@ -257,7 +266,7 @@ func (s *server) Serve(service, hostname string, port int, exit chan error) <-ch
 		}
 		close(exit)
 	}()
-	s.regiserService(service, hostname, port)
+	s.registerService(service, hostname, port)
 	go s.gracefulShutdown(exit)
 	return exit
 }
@@ -269,13 +278,13 @@ func (s *server) ServeTLS(service, hostname string, port int, exit chan error, c
 		}
 		close(exit)
 	}()
-	s.regiserService(service, hostname, port)
+	s.registerService(service, hostname, port)
 	go s.gracefulShutdown(exit)
 	return exit
 }
 
 func (s *server) Shutdown() error {
-	s.deregiserService()
+	s.deregisterService()
 	return s.server.Shutdown()
 }
 
@@ -355,7 +364,7 @@ func (s *server) getInstanceId() string {
 	return fmt.Sprintf("%s-http-%s-%d", s.service, s.hostname, s.port)
 }
 
-func (s *server) regiserService(service, hostname string, port int) error {
+func (s *server) registerService(service, hostname string, port int) error {
 	s.service = service
 	s.hostname = hostname
 	s.port = port
@@ -378,7 +387,7 @@ func (s *server) regiserService(service, hostname string, port int) error {
 	return nil
 }
 
-func (s *server) deregiserService() error {
+func (s *server) deregisterService() error {
 	if s.state != nil {
 		s.state.ServiceDeregister(
 			s.getInstanceId(),
@@ -460,6 +469,25 @@ func (ctx *reqCtx) WriteString(s string) (int, error) {
 func (ctx *reqCtx) WriteJson(data any) error {
 	ctx.RequestCtx.Response.Header.SetContentType("application/json")
 	return json.NewEncoder(ctx).Encode(data)
+}
+
+func (ctx *reqCtx) WriteResponse(response *Response) error {
+	ctx.SetStatusCode(response.StatusCode)
+	return ctx.WriteJson(
+		struct {
+			Status string `json:"status"`
+			Code   string `json:"code"`
+			Data   any    `json:"data"`
+		}{
+			response.Status,
+			response.Code,
+			response.Data,
+		},
+	)
+}
+
+func (ctx *reqCtx) NewResponse(statusCode int, status, code string, data any) *Response {
+	return &Response{statusCode, status, code, data}
 }
 
 func wrapCtx(handler ReqHandler) fasthttp.RequestHandler {
