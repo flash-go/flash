@@ -250,7 +250,7 @@ func (s *server) GetListener() net.Listener {
 
 func (s *server) Listen(service, hostname string, port int) <-chan error {
 	exit := make(chan error, 1)
-	listener, err := net.Listen("tcp4", fmt.Sprintf("%s:%d", hostname, port))
+	listener, err := net.Listen("tcp4", fmt.Sprintf(":%d", port))
 	if err != nil {
 		exit <- err
 		close(exit)
@@ -262,7 +262,7 @@ func (s *server) Listen(service, hostname string, port int) <-chan error {
 
 func (s *server) ListenTLS(service, hostname string, port int, certFile, keyFile string) <-chan error {
 	exit := make(chan error, 1)
-	listener, err := net.Listen("tcp4", fmt.Sprintf("%s:%d", hostname, port))
+	listener, err := net.Listen("tcp4", fmt.Sprintf(":%d", port))
 	if err != nil {
 		exit <- err
 		close(exit)
