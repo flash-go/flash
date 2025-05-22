@@ -7,6 +7,7 @@ toolchain go1.23.8
 require (
 	github.com/elastic/go-elasticsearch/v8 v8.17.1
 	github.com/fasthttp/router v1.5.4
+	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/hashicorp/consul/api v1.32.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/rs/zerolog v1.34.0

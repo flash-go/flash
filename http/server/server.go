@@ -43,6 +43,7 @@ type Server interface {
 	DisableLogo(disable bool) Server
 	AddRoute(method, path string, handler func(request ReqCtx), middlewares ...func(handler ReqHandler) ReqHandler) Server
 	UseState(state state.State) Server
+	UseCors(cors Cors) Server
 	UseLogger(logger logger.Logger) Server
 	UseTelemetry(telemetry telemetry.Telemetry) Server
 	UseSwagger() Server
@@ -130,6 +131,18 @@ func (s *server) AddRoute(method, path string, handler func(request ReqCtx), mid
 		h = middlewares[i](h)
 	}
 	s.addRoute(method, path, h)
+	return s
+}
+
+func (s *server) UseCors(cors Cors) Server {
+	s.appendMiddleware(func(handler fasthttp.RequestHandler) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			ctx.Response.Header.Set("Access-Control-Allow-Origin", cors.Origin)
+			ctx.Response.Header.Set("Access-Control-Allow-Methods", cors.Methods)
+			ctx.Response.Header.Set("Access-Control-Allow-Headers", cors.Headers)
+			handler(ctx)
+		}
+	})
 	return s
 }
 
@@ -494,4 +507,10 @@ func wrapCtx(handler ReqHandler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		handler(&reqCtx{ctx})
 	}
+}
+
+type Cors struct {
+	Origin  string
+	Methods string
+	Headers string
 }

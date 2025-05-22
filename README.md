@@ -14,9 +14,9 @@ A high-performance web framework written in Go for building enterprise-grade dis
 
 - HTTP transport
   - Extreme client/server performance built on the [FastHTTP](https://github.com/valyala/fasthttp)
-  - Zero memory allocations in hot paths
   - Up to 10x faster than net/http
   - Designed for high-performance edge cases
+  - Zero memory allocations in hot paths
   - Lightweight high performance HTTP [router](https://github.com/fasthttp/router)
   - Outgoing requests to services with loadbalancer
   - Middleware support
@@ -1037,6 +1037,31 @@ func main() {
 
 	// Use profiling
 	httpServer.UseProfiling()
+}
+```
+
+### Use CORS
+
+```go
+package main
+
+import (
+	"github.com/flash-go/flash/http/server"
+)
+
+func main() {
+	// Create http server
+	httpServer := {...}
+
+	// Create CORS
+	cors := server.Cors{
+		Origin:  "*",
+		Methods: "*",
+		Headers: "*",
+	},
+	
+	// Use CORS
+	httpServer.UseCors(cors)
 }
 ```
 

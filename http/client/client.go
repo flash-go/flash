@@ -154,6 +154,10 @@ func (r *response) StatusCode() int {
 	return r.Response.Header.StatusCode()
 }
 
+func (r *response) ContentType() []byte {
+	return r.Response.Header.ContentType()
+}
+
 type fasthttpRequestHeaderCarrier struct {
 	header *fasthttp.RequestHeader
 }
@@ -177,6 +181,7 @@ func (f fasthttpRequestHeaderCarrier) Keys() []string {
 type Response interface {
 	Body() []byte
 	StatusCode() int
+	ContentType() []byte
 }
 
 type RequestOption interface {
