@@ -456,7 +456,11 @@ func (ctx *reqCtx) UserValue(key any) any {
 }
 
 func (ctx *reqCtx) Telemetry() context.Context {
-	return ctx.RequestCtx.UserValue("tctx").(context.Context)
+	tctx := ctx.RequestCtx.UserValue("tctx"); if tctx != nil {
+		return tctx.(context.Context)
+	} else {
+		return context.Background()
+	}
 }
 
 func (ctx *reqCtx) SetContentType(contentType string) {
