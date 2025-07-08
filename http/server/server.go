@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -29,49 +30,62 @@ import (
 var startupLogo string
 
 const (
-	fasthttpHttpServerLogAllErrors    = true
-	fasthttpHttpServerCloseOnShutdown = true
-	fasthttpHttpServerConcurrency     = fasthttp.DefaultConcurrency
-	defaultServerName                 = "Flash"
-	disableLogoOnStartup              = false
+	fasthttpHttpServerLogAllErrors       = true
+	fasthttpHttpServerCloseOnShutdown    = true
+	fasthttpHttpServerConcurrency        = fasthttp.DefaultConcurrency
+	fasthttpHttpServerMaxRequestBodySize = fasthttp.DefaultMaxRequestBodySize
+	defaultServerName                    = "Flash"
+	defaultSuccessResponseStatus         = 200
+	defaultSuccessResponseCode           = "request_successfully"
+	defaultErrorResponseStatus           = 503
+	defaultErrorResponseCode             = "service_unavailable"
+	disableLogoOnStartup                 = false
 	// TODO: Add processing (graceful/forceful)
 	osSignalBuffer = 2
 )
 
 type Server interface {
-	SetServerName(name string) Server
-	DisableLogo(disable bool) Server
+	SetReadTimeout(time.Duration) Server
+	SetIdleTimeout(time.Duration) Server
+	SetMaxRequestBodySize(int) Server
+	SetServerName(string) Server
+	DisableLogo(bool) Server
 	AddRoute(method, path string, handler func(request ReqCtx), middlewares ...func(handler ReqHandler) ReqHandler) Server
-	UseState(state state.State) Server
-	UseCors(cors Cors) Server
-	UseLogger(logger logger.Logger) Server
-	UseTelemetry(telemetry telemetry.Telemetry) Server
+	UseState(state.State) Server
+	UseCors(Cors) Server
+	UseLogger(logger.Logger) Server
+	UseTelemetry(telemetry.Telemetry) Server
 	UseSwagger() Server
 	UseProfiling() Server
-	SetListener(listener net.Listener)
+	SetListener(net.Listener)
 	GetListener() net.Listener
-	Listen(service, hostname string, port int) <-chan error
-	ListenTLS(service, hostname string, port int, certFile, keyFile string) <-chan error
-	Serve(service, hostname string, port int, exit chan error) <-chan error
-	ServeTLS(service, hostname string, port int, exit chan error, certFile, keyFile string) <-chan error
+	Listen(hostname string, port int) <-chan error
+	ListenTLS(hostname string, port int, certFile, keyFile string) <-chan error
+	Serve(hostname string, port int, exit chan error) <-chan error
+	ServeTLS(hostname string, port int, exit chan error, certFile, keyFile string) <-chan error
 	Shutdown() error
+	RegisterService(service, hostname string, port int) error
+	DeregisterService() error
 }
 
 type ReqCtx interface {
 	Request() *fasthttp.Request
-	ReadJson(data any) error
+	ReadJson(any) error
 	Body() []byte
 	SetUserValue(key any, value any)
 	UserValue(key any) any
 	Telemetry() context.Context
-	SetContentType(contentType string)
-	SetStatusCode(statusCode int)
+	AuthToken() string
+	SetContentType(string)
+	SetStatusCode(int)
 	Error(msg string, statusCode int)
-	Write(p []byte) (int, error)
-	WriteString(s string) (int, error)
-	WriteJson(data any) error
-	WriteResponse(response *Response) error
+	Write([]byte) (int, error)
+	WriteString(string) (int, error)
+	WriteJson(any) error
+	WriteResponse(*Response) error
 	NewResponse(statusCode int, status, code string, data any) *Response
+	WriteSuccessResponse(data any)
+	WriteErrorResponse(err error, data any)
 }
 
 type Response struct {
@@ -81,12 +95,27 @@ type Response struct {
 	Data       any
 }
 
+type BaseResponse struct {
+	Status string `json:"status"`
+	Code   string `json:"code"`
+	Data   any    `json:"data"`
+}
+
+type SuccessResponse struct {
+	Status int
+	Code   string
+}
+
+type ErrorResponse map[error]int
+
+type ResponseConfig struct {
+	Success SuccessResponse
+	Err     ErrorResponse
+}
+
 type ReqHandler func(ReqCtx)
 
 type server struct {
-	service     string
-	hostname    string
-	port        int
 	listener    net.Listener
 	server      *fasthttp.Server
 	router      *router.Router
@@ -94,6 +123,7 @@ type server struct {
 	disableLogo bool
 	logger      logger.Logger
 	state       state.State
+	instanceId  string
 }
 
 func New() Server {
@@ -108,11 +138,27 @@ func New() Server {
 			NoDefaultDate:         true,
 			ReadTimeout:           10 * time.Second,
 			IdleTimeout:           300 * time.Second,
+			MaxRequestBodySize:    fasthttpHttpServerMaxRequestBodySize,
 		},
 		router:      router.New(),
 		middleware:  fasthttpMiddleware{},
 		disableLogo: disableLogoOnStartup,
 	}
+}
+
+func (s *server) SetReadTimeout(d time.Duration) Server {
+	s.server.ReadTimeout = d
+	return s
+}
+
+func (s *server) SetIdleTimeout(d time.Duration) Server {
+	s.server.IdleTimeout = d
+	return s
+}
+
+func (s *server) SetMaxRequestBodySize(b int) Server {
+	s.server.MaxRequestBodySize = b
+	return s
 }
 
 func (s *server) SetServerName(name string) Server {
@@ -151,6 +197,7 @@ func (s *server) UseLogger(logger logger.Logger) Server {
 	s.server.Logger = logger
 	s.appendMiddleware(func(handler fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
+			ctx.SetUserValue("logger", logger)
 			start := time.Now()
 			handler(ctx)
 			logger.Log().Info().
@@ -229,9 +276,6 @@ func (s *server) UseSwagger() Server {
 
 func (s *server) UseState(state state.State) Server {
 	s.state = state
-	s.router.Handle("GET", "/health", func(ctx *fasthttp.RequestCtx) {
-		ctx.SetStatusCode(200)
-	})
 	return s
 }
 
@@ -248,7 +292,7 @@ func (s *server) GetListener() net.Listener {
 	return s.listener
 }
 
-func (s *server) Listen(service, hostname string, port int) <-chan error {
+func (s *server) Listen(hostname string, port int) <-chan error {
 	exit := make(chan error, 1)
 	listener, err := net.Listen("tcp4", fmt.Sprintf("%s:%d", hostname, port))
 	if err != nil {
@@ -257,10 +301,10 @@ func (s *server) Listen(service, hostname string, port int) <-chan error {
 		return exit
 	}
 	s.SetListener(listener)
-	return s.Serve(service, hostname, port, exit)
+	return s.Serve(hostname, port, exit)
 }
 
-func (s *server) ListenTLS(service, hostname string, port int, certFile, keyFile string) <-chan error {
+func (s *server) ListenTLS(hostname string, port int, certFile, keyFile string) <-chan error {
 	exit := make(chan error, 1)
 	listener, err := net.Listen("tcp4", fmt.Sprintf("%s:%d", hostname, port))
 	if err != nil {
@@ -269,36 +313,67 @@ func (s *server) ListenTLS(service, hostname string, port int, certFile, keyFile
 		return exit
 	}
 	s.SetListener(listener)
-	return s.ServeTLS(service, hostname, port, exit, certFile, keyFile)
+	return s.ServeTLS(hostname, port, exit, certFile, keyFile)
 }
 
-func (s *server) Serve(service, hostname string, port int, exit chan error) <-chan error {
+func (s *server) Serve(hostname string, port int, exit chan error) <-chan error {
 	go func() {
 		if err := s.serve(); err != nil {
 			exit <- err
 		}
 		close(exit)
 	}()
-	s.registerService(service, hostname, port)
 	go s.gracefulShutdown(exit)
 	return exit
 }
 
-func (s *server) ServeTLS(service, hostname string, port int, exit chan error, certFile, keyFile string) <-chan error {
+func (s *server) ServeTLS(hostname string, port int, exit chan error, certFile, keyFile string) <-chan error {
 	go func() {
 		if err := s.serveTLS(certFile, keyFile); err != nil {
 			exit <- err
 		}
 		close(exit)
 	}()
-	s.registerService(service, hostname, port)
 	go s.gracefulShutdown(exit)
 	return exit
 }
 
 func (s *server) Shutdown() error {
-	s.deregisterService()
+	s.DeregisterService()
 	return s.server.Shutdown()
+}
+
+func (s *server) RegisterService(service, hostname string, port int) error {
+	if s.state == nil {
+		return errors.New("state not set")
+	}
+	s.router.Handle("GET", "/health", func(ctx *fasthttp.RequestCtx) {
+		ctx.SetStatusCode(200)
+	})
+	instanceId := s.setInstanceId(service, hostname, port)
+	return s.state.ServiceRegister(
+		&api.AgentServiceRegistration{
+			ID:      instanceId,
+			Name:    service + "-http",
+			Port:    port,
+			Address: hostname,
+			Check: &api.AgentServiceCheck{
+				HTTP:                           fmt.Sprintf("http://%s:%d/health", hostname, port),
+				Interval:                       "10s",
+				Timeout:                        "1s",
+				DeregisterCriticalServiceAfter: "1m",
+			},
+		},
+	)
+}
+
+func (s *server) DeregisterService() error {
+	if s.state == nil {
+		return errors.New("state not set")
+	}
+	return s.state.ServiceDeregister(
+		s.getInstanceId(),
+	)
 }
 
 func (s *server) printLogo() {
@@ -374,39 +449,12 @@ func (s *server) appendMiddleware(fn func(handler fasthttp.RequestHandler) fasth
 }
 
 func (s *server) getInstanceId() string {
-	return fmt.Sprintf("%s-http-%s-%d", s.service, s.hostname, s.port)
+	return s.instanceId
 }
 
-func (s *server) registerService(service, hostname string, port int) error {
-	s.service = service
-	s.hostname = hostname
-	s.port = port
-	if s.state != nil {
-		return s.state.ServiceRegister(
-			&api.AgentServiceRegistration{
-				ID:      s.getInstanceId(),
-				Name:    service + "-http",
-				Port:    port,
-				Address: hostname,
-				Check: &api.AgentServiceCheck{
-					HTTP:                           fmt.Sprintf("http://%s:%d/health", hostname, port),
-					Interval:                       "10s",
-					Timeout:                        "1s",
-					DeregisterCriticalServiceAfter: "1m",
-				},
-			},
-		)
-	}
-	return nil
-}
-
-func (s *server) deregisterService() error {
-	if s.state != nil {
-		s.state.ServiceDeregister(
-			s.getInstanceId(),
-		)
-	}
-	return nil
+func (s *server) setInstanceId(service, hostname string, port int) string {
+	s.instanceId = fmt.Sprintf("%s-http-%s-%d", service, hostname, port)
+	return s.instanceId
 }
 
 type fasthttpMiddleware = []func(handler fasthttp.RequestHandler) fasthttp.RequestHandler
@@ -456,11 +504,15 @@ func (ctx *reqCtx) UserValue(key any) any {
 }
 
 func (ctx *reqCtx) Telemetry() context.Context {
-	tctx := ctx.RequestCtx.UserValue("tctx"); if tctx != nil {
+	if tctx := ctx.RequestCtx.UserValue("tctx"); tctx != nil {
 		return tctx.(context.Context)
 	} else {
 		return context.Background()
 	}
+}
+
+func (ctx *reqCtx) AuthToken() string {
+	return string(ctx.RequestCtx.Request.Header.Peek("Authorization"))
 }
 
 func (ctx *reqCtx) SetContentType(contentType string) {
@@ -491,11 +543,7 @@ func (ctx *reqCtx) WriteJson(data any) error {
 func (ctx *reqCtx) WriteResponse(response *Response) error {
 	ctx.SetStatusCode(response.StatusCode)
 	return ctx.WriteJson(
-		struct {
-			Status string `json:"status"`
-			Code   string `json:"code"`
-			Data   any    `json:"data"`
-		}{
+		BaseResponse{
 			response.Status,
 			response.Code,
 			response.Data,
@@ -505,6 +553,53 @@ func (ctx *reqCtx) WriteResponse(response *Response) error {
 
 func (ctx *reqCtx) NewResponse(statusCode int, status, code string, data any) *Response {
 	return &Response{statusCode, status, code, data}
+}
+
+func (ctx *reqCtx) WriteSuccessResponse(data any) {
+	status := defaultSuccessResponseStatus
+	code := defaultSuccessResponseCode
+	if response := ctx.RequestCtx.UserValue("response"); response != nil {
+		config := response.(ResponseConfig)
+		status = config.Success.Status
+		code = config.Success.Code
+	}
+	if err := ctx.WriteResponse(
+		ctx.NewResponse(status, "success", code, data),
+	); err != nil {
+		if loggerService := ctx.RequestCtx.UserValue("logger"); loggerService != nil {
+			loggerService.(logger.Logger).Log().Err(err).Send()
+		}
+	}
+}
+
+func (ctx *reqCtx) WriteErrorResponse(err error, data any) {
+	loggerService := ctx.RequestCtx.UserValue("logger")
+	status := defaultErrorResponseStatus
+	code := defaultErrorResponseCode
+	errMap := ErrorResponse{}
+	if response := ctx.RequestCtx.UserValue("response"); response != nil {
+		config := response.(ResponseConfig)
+		errMap = config.Err
+	}
+	for customErr, statusCode := range errMap {
+		if errors.Is(err, customErr) {
+			status = statusCode
+			code = customErr.Error()
+			break
+		}
+	}
+	if status == 503 {
+		if loggerService != nil {
+			loggerService.(logger.Logger).Log().Err(err).Send()
+		}
+	}
+	if err := ctx.WriteResponse(
+		ctx.NewResponse(status, "error", code, data),
+	); err != nil {
+		if loggerService != nil {
+			loggerService.(logger.Logger).Log().Err(err).Send()
+		}
+	}
 }
 
 func wrapCtx(handler ReqHandler) fasthttp.RequestHandler {

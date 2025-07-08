@@ -22,11 +22,11 @@ const (
 )
 
 type Client interface {
-	SetReadTimeout(d time.Duration) Client
-	SetWriteTimeout(d time.Duration) Client
-	SetMaxIdleConnDuration(d time.Duration) Client
-	UseTelemetry(telemetry telemetry.Telemetry) Client
-	UseState(state state.State) Client
+	SetReadTimeout(time.Duration) Client
+	SetWriteTimeout(time.Duration) Client
+	SetMaxIdleConnDuration(time.Duration) Client
+	UseTelemetry(telemetry.Telemetry) Client
+	UseState(state.State) Client
 	Request(ctx context.Context, method string, url string, options ...RequestOption) (Response, error)
 	ServiceRequest(ctx context.Context, method string, service, uri string, options ...RequestOption) (Response, error)
 }
@@ -134,12 +134,12 @@ func (c *client) ServiceRequest(ctx context.Context, method string, service, uri
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instance: %w", err)
 	}
-	u := &url.URL{
+	url := &url.URL{
 		Scheme: "http",
 		Host:   fmt.Sprintf("%s:%d", instance.ServiceAddress, instance.ServicePort),
 		Path:   uri,
 	}
-	return c.Request(ctx, method, u.String(), options...)
+	return c.Request(ctx, method, url.String(), options...)
 }
 
 type response struct {
