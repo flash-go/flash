@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,10 +25,16 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 //go:embed logo.txt
 var startupLogo string
+
+var (
+	defaultErrorResponseStatus = 503
+	defaultErrorResponseMsg    = "internal:service_unavailable"
+)
 
 const (
 	fasthttpHttpServerLogAllErrors       = true
@@ -35,16 +42,13 @@ const (
 	fasthttpHttpServerConcurrency        = fasthttp.DefaultConcurrency
 	fasthttpHttpServerMaxRequestBodySize = fasthttp.DefaultMaxRequestBodySize
 	defaultServerName                    = "Flash"
-	defaultSuccessResponseStatus         = 200
-	defaultSuccessResponseCode           = "request_successfully"
-	defaultErrorResponseStatus           = 503
-	defaultErrorResponseCode             = "service_unavailable"
 	disableLogoOnStartup                 = false
 	// TODO: Add processing (graceful/forceful)
 	osSignalBuffer = 2
 )
 
 type Server interface {
+	SetErrorResponseStatusMap(*ErrorResponseStatusMap) Server
 	SetReadTimeout(time.Duration) Server
 	SetIdleTimeout(time.Duration) Server
 	SetMaxRequestBodySize(int) Server
@@ -72,58 +76,35 @@ type ReqCtx interface {
 	Request() *fasthttp.Request
 	ReadJson(any) error
 	Body() []byte
-	SetUserValue(key any, value any)
-	UserValue(key any) any
-	Telemetry() context.Context
-	AuthToken() string
 	SetContentType(string)
 	SetStatusCode(int)
+	SetUserValue(key any, value any)
+	GetHeader(key string) string
+	UserValue(key any) any
+	Context() context.Context
+	GetBearerToken() (string, error)
 	Error(msg string, statusCode int)
 	Write([]byte) (int, error)
 	WriteString(string) (int, error)
 	WriteJson(any) error
-	WriteResponse(*Response) error
-	NewResponse(statusCode int, status, code string, data any) *Response
-	WriteSuccessResponse(data any)
-	WriteErrorResponse(err error, data any)
+	WriteResponse(statusCode int, data any) error
+	WriteErrorResponse(err error)
 }
 
-type Response struct {
-	StatusCode int
-	Status     string
-	Code       string
-	Data       any
-}
-
-type BaseResponse struct {
-	Status string `json:"status"`
-	Code   string `json:"code"`
-	Data   any    `json:"data"`
-}
-
-type SuccessResponse struct {
-	Status int
-	Code   string
-}
-
-type ErrorResponse map[error]int
-
-type ResponseConfig struct {
-	Success SuccessResponse
-	Err     ErrorResponse
-}
+type ErrorResponseStatusMap map[error]int
 
 type ReqHandler func(ReqCtx)
 
 type server struct {
-	listener    net.Listener
-	server      *fasthttp.Server
-	router      *router.Router
-	middleware  fasthttpMiddleware
-	disableLogo bool
-	logger      logger.Logger
-	state       state.State
-	instanceId  string
+	listener               net.Listener
+	server                 *fasthttp.Server
+	router                 *router.Router
+	middleware             fasthttpMiddleware
+	disableLogo            bool
+	logger                 logger.Logger
+	state                  state.State
+	instanceId             string
+	errorResponseStatusMap *ErrorResponseStatusMap
 }
 
 func New() Server {
@@ -137,13 +118,19 @@ func New() Server {
 			NoDefaultContentType:  true,
 			NoDefaultDate:         true,
 			ReadTimeout:           10 * time.Second,
-			IdleTimeout:           300 * time.Second,
+			WriteTimeout:          10 * time.Second,
+			IdleTimeout:           10 * time.Second,
 			MaxRequestBodySize:    fasthttpHttpServerMaxRequestBodySize,
 		},
 		router:      router.New(),
 		middleware:  fasthttpMiddleware{},
 		disableLogo: disableLogoOnStartup,
 	}
+}
+
+func (s *server) SetErrorResponseStatusMap(m *ErrorResponseStatusMap) Server {
+	s.errorResponseStatusMap = m
+	return s
 }
 
 func (s *server) SetReadTimeout(d time.Duration) Server {
@@ -197,14 +184,11 @@ func (s *server) UseLogger(logger logger.Logger) Server {
 	s.server.Logger = logger
 	s.appendMiddleware(func(handler fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
-			ctx.SetUserValue("logger", logger)
-			start := time.Now()
 			handler(ctx)
 			logger.Log().Info().
 				Str("method", string(ctx.Method())).
 				Str("path", string(ctx.Path())).
 				Int("status", ctx.Response.StatusCode()).
-				Dur("latency", time.Since(start)).
 				Msg("->")
 		}
 	})
@@ -213,21 +197,18 @@ func (s *server) UseLogger(logger logger.Logger) Server {
 
 func (s *server) UseTelemetry(telemetry telemetry.Telemetry) Server {
 	requestsTotalMetric, _ := telemetry.NewMetricInt64Counter(
-		"http",
 		"requests_total",
 		false,
 		metric.WithDescription("Total number of processed requests"),
 		metric.WithUnit("req"),
 	)
 	requestsInFlightMetric, _ := telemetry.NewMetricInt64UpDownCounter(
-		"http",
 		"requests_in_flight",
 		false,
 		metric.WithDescription("Current number of requests being processed"),
 		metric.WithUnit("req"),
 	)
 	requestDurationMetric, _ := telemetry.NewMetricFloat64Histogram(
-		"http",
 		"request_duration",
 		false,
 		metric.WithDescription("Histogram of response time for handler"),
@@ -237,10 +218,10 @@ func (s *server) UseTelemetry(telemetry telemetry.Telemetry) Server {
 	s.appendMiddleware(func(handler fasthttp.RequestHandler) fasthttp.RequestHandler {
 		return func(ctx *fasthttp.RequestCtx) {
 			tctx := otel.GetTextMapPropagator().Extract(context.Background(), fasthttpRequestCtxHeaderCarrier{ctx})
-			tctx, span := telemetry.Tracer("http").Start(tctx, "incoming request")
+			tctx, span := telemetry.Tracer().Start(tctx, "incoming request")
 			defer span.End()
 
-			ctx.SetUserValue("tctx", tctx)
+			ctx.SetUserValue("ctx", tctx)
 
 			requestsInFlightMetric.Add(tctx, 1)
 			defer requestsInFlightMetric.Add(tctx, -1)
@@ -441,7 +422,13 @@ func (s *server) gracefulShutdown(exit chan error) {
 }
 
 func (s *server) addRoute(method string, path string, handler ReqHandler) {
-	s.router.Handle(method, path, wrapCtx(handler))
+	s.router.Handle(method, path, s.wrapCtx(handler))
+}
+
+func (s *server) wrapCtx(handler ReqHandler) fasthttp.RequestHandler {
+	return func(ctx *fasthttp.RequestCtx) {
+		handler(&reqCtx{ctx, s})
+	}
 }
 
 func (s *server) appendMiddleware(fn func(handler fasthttp.RequestHandler) fasthttp.RequestHandler) {
@@ -481,6 +468,7 @@ func (c fasthttpRequestCtxHeaderCarrier) Keys() []string {
 
 type reqCtx struct {
 	*fasthttp.RequestCtx
+	*server
 }
 
 func (ctx *reqCtx) Request() *fasthttp.Request {
@@ -495,26 +483,6 @@ func (ctx *reqCtx) Body() []byte {
 	return ctx.RequestCtx.Request.Body()
 }
 
-func (ctx *reqCtx) SetUserValue(key any, value any) {
-	ctx.RequestCtx.SetUserValue(key, value)
-}
-
-func (ctx *reqCtx) UserValue(key any) any {
-	return ctx.RequestCtx.UserValue(key)
-}
-
-func (ctx *reqCtx) Telemetry() context.Context {
-	if tctx := ctx.RequestCtx.UserValue("tctx"); tctx != nil {
-		return tctx.(context.Context)
-	} else {
-		return context.Background()
-	}
-}
-
-func (ctx *reqCtx) AuthToken() string {
-	return string(ctx.RequestCtx.Request.Header.Peek("Authorization"))
-}
-
 func (ctx *reqCtx) SetContentType(contentType string) {
 	ctx.RequestCtx.SetContentType(contentType)
 }
@@ -523,11 +491,54 @@ func (ctx *reqCtx) SetStatusCode(statusCode int) {
 	ctx.RequestCtx.SetStatusCode(statusCode)
 }
 
+func (ctx *reqCtx) SetUserValue(key any, value any) {
+	ctx.RequestCtx.SetUserValue(key, value)
+}
+
+func (ctx *reqCtx) GetHeader(key string) string {
+	return string(ctx.Request().Header.Peek(key))
+}
+
+func (ctx *reqCtx) UserValue(key any) any {
+	return ctx.RequestCtx.UserValue(key)
+}
+
+func (ctx *reqCtx) Context() context.Context {
+	if c := ctx.RequestCtx.UserValue("ctx"); c != nil {
+		return c.(context.Context)
+	} else {
+		return context.Background()
+	}
+}
+
+func (ctx *reqCtx) GetBearerToken() (string, error) {
+	authHeader := ctx.GetHeader("Authorization")
+
+	if authHeader == "" {
+		return "", errors.New("authorization header not found")
+	}
+
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		return "", errors.New("missing bearer prefix")
+	}
+
+	// Trim Bearer prefix
+	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer"))
+
+	return token, nil
+}
+
 func (ctx *reqCtx) Error(msg string, statusCode int) {
 	ctx.RequestCtx.Error(msg, statusCode)
 }
 
 func (ctx *reqCtx) Write(p []byte) (int, error) {
+	// Set trace id header
+	spanCtx := trace.SpanContextFromContext(ctx.Context())
+	if spanCtx.HasTraceID() {
+		ctx.Response.Header.Set("X-Trace-Id", spanCtx.TraceID().String())
+	}
+
 	return ctx.RequestCtx.Write(p)
 }
 
@@ -536,76 +547,51 @@ func (ctx *reqCtx) WriteString(s string) (int, error) {
 }
 
 func (ctx *reqCtx) WriteJson(data any) error {
-	ctx.RequestCtx.Response.Header.SetContentType("application/json")
+	ctx.SetContentType("application/json")
 	return json.NewEncoder(ctx).Encode(data)
 }
 
-func (ctx *reqCtx) WriteResponse(response *Response) error {
-	ctx.SetStatusCode(response.StatusCode)
-	return ctx.WriteJson(
-		BaseResponse{
-			response.Status,
-			response.Code,
-			response.Data,
-		},
-	)
+func (ctx *reqCtx) WriteResponse(statusCode int, data any) error {
+	// Set response status code
+	ctx.SetStatusCode(statusCode)
+
+	// Write json response data
+	return ctx.WriteJson(data)
 }
 
-func (ctx *reqCtx) NewResponse(statusCode int, status, code string, data any) *Response {
-	return &Response{statusCode, status, code, data}
-}
+func (ctx *reqCtx) WriteErrorResponse(err error) {
+	// Set default status and error codes
+	statusCode := defaultErrorResponseStatus
+	msg := defaultErrorResponseMsg
 
-func (ctx *reqCtx) WriteSuccessResponse(data any) {
-	status := defaultSuccessResponseStatus
-	code := defaultSuccessResponseCode
-	if response := ctx.RequestCtx.UserValue("response"); response != nil {
-		config := response.(ResponseConfig)
-		status = config.Success.Status
-		code = config.Success.Code
-	}
-	if err := ctx.WriteResponse(
-		ctx.NewResponse(status, "success", code, data),
-	); err != nil {
-		if loggerService := ctx.RequestCtx.UserValue("logger"); loggerService != nil {
-			loggerService.(logger.Logger).Log().Err(err).Send()
+	parseMap := func(e error, m *ErrorResponseStatusMap, statusCode *int, msg *string) {
+		for customErr, customStatus := range *m {
+			if errors.Is(e, customErr) {
+				*statusCode = customStatus
+				*msg = err.Error()
+				break
+			}
 		}
 	}
-}
 
-func (ctx *reqCtx) WriteErrorResponse(err error, data any) {
-	loggerService := ctx.RequestCtx.UserValue("logger")
-	status := defaultErrorResponseStatus
-	code := defaultErrorResponseCode
-	errMap := ErrorResponse{}
-	if response := ctx.RequestCtx.UserValue("response"); response != nil {
-		config := response.(ResponseConfig)
-		errMap = config.Err
+	// Parse global error response map
+	if ctx.server.errorResponseStatusMap != nil {
+		parseMap(err, ctx.server.errorResponseStatusMap, &statusCode, &msg)
 	}
-	for customErr, statusCode := range errMap {
-		if errors.Is(err, customErr) {
-			status = statusCode
-			code = customErr.Error()
-			break
-		}
-	}
-	if status == 503 {
-		if loggerService != nil {
-			loggerService.(logger.Logger).Log().Err(err).Send()
-		}
-	}
-	if err := ctx.WriteResponse(
-		ctx.NewResponse(status, "error", code, data),
-	); err != nil {
-		if loggerService != nil {
-			loggerService.(logger.Logger).Log().Err(err).Send()
-		}
-	}
-}
 
-func wrapCtx(handler ReqHandler) fasthttp.RequestHandler {
-	return func(ctx *fasthttp.RequestCtx) {
-		handler(&reqCtx{ctx})
+	// Parse local error response map
+	if e := ctx.UserValue("error_response"); e != nil {
+		m := e.(ErrorResponseStatusMap)
+		parseMap(err, &m, &statusCode, &msg)
 	}
+
+	// Logging errors
+	if statusCode == defaultErrorResponseStatus && ctx.server.logger != nil {
+		ctx.server.logger.Log().Err(err).Send()
+	}
+
+	// Write error response
+	ctx.Error(msg, statusCode)
 }
 
 type Cors struct {

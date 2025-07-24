@@ -16,12 +16,24 @@ import (
 )
 
 const (
-	defaultReadTimeout         = 10 * time.Second
-	defaultWriteTimeout        = 10 * time.Second
-	defaultMaxIdleConnDuration = 1 * time.Hour
+	defaultName                      = "Flash"
+	defaultReadTimeout               = 10 * time.Second
+	defaultWriteTimeout              = 10 * time.Second
+	defaultMaxConnDuration           = 0
+	defaultMaxIdleConnDuration       = fasthttp.DefaultMaxIdleConnDuration
+	defaultMaxIdemponentCallAttempts = fasthttp.DefaultMaxIdemponentCallAttempts
+	defaultMaxConnsPerHost           = fasthttp.DefaultMaxConnsPerHost
+	defaultReadBufferSize            = 4096
+	defaultWriteBufferSize           = 4096
 )
 
 type Client interface {
+	SetReadBufferSize(int) Client
+	SetWriteBufferSize(int) Client
+	SetMaxConnsPerHost(int) Client
+	SetName(string) Client
+	SetMaxIdemponentCallAttempts(int) Client
+	SetMaxConnDuration(time.Duration) Client
 	SetReadTimeout(time.Duration) Client
 	SetWriteTimeout(time.Duration) Client
 	SetMaxIdleConnDuration(time.Duration) Client
@@ -40,12 +52,17 @@ type client struct {
 func New() Client {
 	return &client{
 		client: &fasthttp.Client{
+			Name:                          defaultName,
+			MaxIdemponentCallAttempts:     defaultMaxIdemponentCallAttempts,
+			MaxConnDuration:               defaultMaxConnDuration,
 			ReadTimeout:                   defaultReadTimeout,
 			WriteTimeout:                  defaultWriteTimeout,
 			MaxIdleConnDuration:           defaultMaxIdleConnDuration,
-			NoDefaultUserAgentHeader:      true, // Don't send: User-Agent: fasthttp
+			MaxConnsPerHost:               defaultMaxConnsPerHost,
 			DisableHeaderNamesNormalizing: true, // If you set the case on your headers correctly you can enable this
 			DisablePathNormalizing:        true,
+			ReadBufferSize:                defaultReadBufferSize,
+			WriteBufferSize:               defaultWriteBufferSize,
 			// increase DNS cache time to an hour instead of default minute
 			Dial: (&fasthttp.TCPDialer{
 				Concurrency:      4096,
@@ -53,6 +70,36 @@ func New() Client {
 			}).Dial,
 		},
 	}
+}
+
+func (c *client) SetReadBufferSize(i int) Client {
+	c.client.ReadBufferSize = i
+	return c
+}
+
+func (c *client) SetWriteBufferSize(i int) Client {
+	c.client.WriteBufferSize = i
+	return c
+}
+
+func (c *client) SetMaxConnsPerHost(i int) Client {
+	c.client.MaxConnsPerHost = i
+	return c
+}
+
+func (c *client) SetName(s string) Client {
+	c.client.Name = s
+	return c
+}
+
+func (c *client) SetMaxIdemponentCallAttempts(i int) Client {
+	c.client.MaxIdemponentCallAttempts = i
+	return c
+}
+
+func (c *client) SetMaxConnDuration(d time.Duration) Client {
+	c.client.MaxConnDuration = d
+	return c
 }
 
 func (c *client) SetReadTimeout(d time.Duration) Client {
@@ -95,7 +142,7 @@ func (c *client) Request(ctx context.Context, method string, url string, options
 		req.Header.SetMethod(method)
 		var span trace.Span
 		if c.telemetry != nil {
-			ctx, span = c.telemetry.Tracer("http").Start(ctx, "outgoing request")
+			ctx, span = c.telemetry.Tracer().Start(ctx, "outgoing request")
 			defer span.End()
 			span.SetAttributes(
 				attribute.String("url", url),

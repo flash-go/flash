@@ -27,18 +27,26 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type Telemetry interface {
-	Tracer(name string) trace.Tracer
-	Meter(name string) metric.Meter
+const (
+	tracerName = "github.com/flash-go/flash"
+	meterName  = "github.com/flash-go/flash"
+)
 
-	NewMetricInt64Counter(meter, name string, register bool, options ...metric.Int64CounterOption) (metric.Int64Counter, error)
-	NewMetricInt64UpDownCounter(meter, name string, register bool, options ...metric.Int64UpDownCounterOption) (metric.Int64UpDownCounter, error)
-	NewMetricInt64Histogram(meter, name string, register bool, options ...metric.Int64HistogramOption) (metric.Int64Histogram, error)
-	NewMetricInt64Gauge(meter, name string, register bool, options ...metric.Int64GaugeOption) (metric.Int64Gauge, error)
-	NewMetricFloat64Counter(meter, name string, register bool, options ...metric.Float64CounterOption) (metric.Float64Counter, error)
-	NewMetricFloat64UpDownCounter(meter, name string, register bool, options ...metric.Float64UpDownCounterOption) (metric.Float64UpDownCounter, error)
-	NewMetricFloat64Histogram(meter, name string, register bool, options ...metric.Float64HistogramOption) (metric.Float64Histogram, error)
-	NewMetricFloat64Gauge(meter, name string, register bool, options ...metric.Float64GaugeOption) (metric.Float64Gauge, error)
+type Telemetry interface {
+	TraceProvider() *traceSdk.TracerProvider
+	MeterProvider() *metricSdk.MeterProvider
+
+	Tracer() trace.Tracer
+	Meter() metric.Meter
+
+	NewMetricInt64Counter(name string, register bool, options ...metric.Int64CounterOption) (metric.Int64Counter, error)
+	NewMetricInt64UpDownCounter(name string, register bool, options ...metric.Int64UpDownCounterOption) (metric.Int64UpDownCounter, error)
+	NewMetricInt64Histogram(name string, register bool, options ...metric.Int64HistogramOption) (metric.Int64Histogram, error)
+	NewMetricInt64Gauge(name string, register bool, options ...metric.Int64GaugeOption) (metric.Int64Gauge, error)
+	NewMetricFloat64Counter(name string, register bool, options ...metric.Float64CounterOption) (metric.Float64Counter, error)
+	NewMetricFloat64UpDownCounter(name string, register bool, options ...metric.Float64UpDownCounterOption) (metric.Float64UpDownCounter, error)
+	NewMetricFloat64Histogram(name string, register bool, options ...metric.Float64HistogramOption) (metric.Float64Histogram, error)
+	NewMetricFloat64Gauge(name string, register bool, options ...metric.Float64GaugeOption) (metric.Float64Gauge, error)
 
 	GetMetricInt64Counter(name string) metric.Int64Counter
 	GetMetricInt64UpDownCounter(name string) metric.Int64UpDownCounter
@@ -184,98 +192,106 @@ func New(service string, traceExporter traceSdk.SpanExporter, metricExporter met
 	}
 }
 
-func (t *telemetry) Tracer(name string) trace.Tracer {
-	return t.traceProvider.Tracer(name)
+func (t *telemetry) TraceProvider() *traceSdk.TracerProvider {
+	return t.traceProvider
 }
 
-func (t *telemetry) Meter(name string) metric.Meter {
-	return t.meterProvider.Meter(name)
+func (t *telemetry) MeterProvider() *metricSdk.MeterProvider {
+	return t.meterProvider
 }
 
-func (t *telemetry) NewMetricInt64Counter(meter, name string, register bool, options ...metric.Int64CounterOption) (metric.Int64Counter, error) {
-	metric, err := t.meterProvider.Meter(meter).Int64Counter(name, options...)
+func (t *telemetry) Tracer() trace.Tracer {
+	return t.traceProvider.Tracer(tracerName)
+}
+
+func (t *telemetry) Meter() metric.Meter {
+	return t.meterProvider.Meter(meterName)
+}
+
+func (t *telemetry) NewMetricInt64Counter(name string, register bool, options ...metric.Int64CounterOption) (metric.Int64Counter, error) {
+	metric, err := t.Meter().Int64Counter(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Int64Counter): %w", err)
 	}
 	if register {
-		t.metricInt64Counter[meter+"-"+name] = metric
+		t.metricInt64Counter[name] = metric
 	}
 	return metric, nil
 }
 
-func (t *telemetry) NewMetricInt64UpDownCounter(meter, name string, register bool, options ...metric.Int64UpDownCounterOption) (metric.Int64UpDownCounter, error) {
-	metric, err := t.meterProvider.Meter(meter).Int64UpDownCounter(name, options...)
+func (t *telemetry) NewMetricInt64UpDownCounter(name string, register bool, options ...metric.Int64UpDownCounterOption) (metric.Int64UpDownCounter, error) {
+	metric, err := t.Meter().Int64UpDownCounter(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Int64UpDownCounter): %w", err)
 	}
 	if register {
-		t.metricInt64UpDownCounter[meter+"-"+name] = metric
+		t.metricInt64UpDownCounter[name] = metric
 	}
 	return metric, nil
 }
 
-func (t *telemetry) NewMetricInt64Histogram(meter, name string, register bool, options ...metric.Int64HistogramOption) (metric.Int64Histogram, error) {
-	metric, err := t.meterProvider.Meter(meter).Int64Histogram(name, options...)
+func (t *telemetry) NewMetricInt64Histogram(name string, register bool, options ...metric.Int64HistogramOption) (metric.Int64Histogram, error) {
+	metric, err := t.Meter().Int64Histogram(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Int64Histogram): %w", err)
 	}
 	if register {
-		t.metricInt64Histogram[meter+"-"+name] = metric
+		t.metricInt64Histogram[name] = metric
 	}
 	return metric, nil
 }
 
-func (t *telemetry) NewMetricInt64Gauge(meter, name string, register bool, options ...metric.Int64GaugeOption) (metric.Int64Gauge, error) {
-	metric, err := t.meterProvider.Meter(meter).Int64Gauge(name, options...)
+func (t *telemetry) NewMetricInt64Gauge(name string, register bool, options ...metric.Int64GaugeOption) (metric.Int64Gauge, error) {
+	metric, err := t.Meter().Int64Gauge(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Int64Gauge): %w", err)
 	}
 	if register {
-		t.metricInt64Gauge[meter+"-"+name] = metric
+		t.metricInt64Gauge[name] = metric
 	}
 	return metric, nil
 }
 
-func (t *telemetry) NewMetricFloat64Counter(meter, name string, register bool, options ...metric.Float64CounterOption) (metric.Float64Counter, error) {
-	metric, err := t.meterProvider.Meter(meter).Float64Counter(name, options...)
+func (t *telemetry) NewMetricFloat64Counter(name string, register bool, options ...metric.Float64CounterOption) (metric.Float64Counter, error) {
+	metric, err := t.Meter().Float64Counter(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Float64Counter): %w", err)
 	}
 	if register {
-		t.metricFloat64Counter[meter+"-"+name] = metric
+		t.metricFloat64Counter[name] = metric
 	}
 	return metric, nil
 }
 
-func (t *telemetry) NewMetricFloat64UpDownCounter(meter, name string, register bool, options ...metric.Float64UpDownCounterOption) (metric.Float64UpDownCounter, error) {
-	metric, err := t.meterProvider.Meter(meter).Float64UpDownCounter(name, options...)
+func (t *telemetry) NewMetricFloat64UpDownCounter(name string, register bool, options ...metric.Float64UpDownCounterOption) (metric.Float64UpDownCounter, error) {
+	metric, err := t.Meter().Float64UpDownCounter(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Float64UpDownCounter): %w", err)
 	}
 	if register {
-		t.metricFloat64UpDownCounter[meter+"-"+name] = metric
+		t.metricFloat64UpDownCounter[name] = metric
 	}
 	return metric, nil
 }
 
-func (t *telemetry) NewMetricFloat64Histogram(meter, name string, register bool, options ...metric.Float64HistogramOption) (metric.Float64Histogram, error) {
-	metric, err := t.meterProvider.Meter(meter).Float64Histogram(name, options...)
+func (t *telemetry) NewMetricFloat64Histogram(name string, register bool, options ...metric.Float64HistogramOption) (metric.Float64Histogram, error) {
+	metric, err := t.Meter().Float64Histogram(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Float64Histogram): %w", err)
 	}
 	if register {
-		t.metricFloat64Histogram[meter+"-"+name] = metric
+		t.metricFloat64Histogram[name] = metric
 	}
 	return metric, nil
 }
 
-func (t *telemetry) NewMetricFloat64Gauge(meter, name string, register bool, options ...metric.Float64GaugeOption) (metric.Float64Gauge, error) {
-	metric, err := t.meterProvider.Meter(meter).Float64Gauge(name, options...)
+func (t *telemetry) NewMetricFloat64Gauge(name string, register bool, options ...metric.Float64GaugeOption) (metric.Float64Gauge, error) {
+	metric, err := t.Meter().Float64Gauge(name, options...)
 	if err != nil {
 		return nil, fmt.Errorf("error creating metric (Float64Gauge): %w", err)
 	}
 	if register {
-		t.metricFloat64Gauge[meter+"-"+name] = metric
+		t.metricFloat64Gauge[name] = metric
 	}
 	return metric, nil
 }
@@ -313,7 +329,6 @@ func (t *telemetry) GetMetricFloat64Gauge(name string) metric.Float64Gauge {
 }
 
 func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
-	meter := "runtime"
 	allMetrics := metrics.All()
 	samples := make([]metrics.Sample, 0, len(allMetrics))
 	cumulative := make(map[string]bool)
@@ -332,7 +347,6 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 		case metrics.KindUint64:
 			if item.Cumulative {
 				_, cError = t.NewMetricInt64Counter(
-					meter,
 					name,
 					true,
 					metric.WithDescription(item.Description),
@@ -340,7 +354,6 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 				)
 			} else {
 				_, cError = t.NewMetricInt64Gauge(
-					meter,
 					name,
 					true,
 					metric.WithDescription(item.Description),
@@ -350,7 +363,6 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 		case metrics.KindFloat64:
 			if item.Cumulative {
 				_, cError = t.NewMetricFloat64Counter(
-					meter,
 					name,
 					true,
 					metric.WithDescription(item.Description),
@@ -358,7 +370,6 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 				)
 			} else {
 				_, cError = t.NewMetricFloat64Gauge(
-					meter,
 					name,
 					true,
 					metric.WithDescription(item.Description),
@@ -367,7 +378,6 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 			}
 		case metrics.KindFloat64Histogram:
 			_, cError = t.NewMetricFloat64Histogram(
-				meter,
 				name,
 				true,
 				metric.WithDescription(item.Description),
@@ -391,27 +401,26 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 					log.Printf("error parsing metric name: %s", sample.Name)
 				}
 
-				index := meter + "-" + name
 				ctx := context.Background()
 
 				switch sample.Value.Kind() {
 				case metrics.KindUint64:
 					if cumulative[name] {
-						t.metricInt64Counter[index].Add(ctx, int64(sample.Value.Uint64()))
+						t.metricInt64Counter[name].Add(ctx, int64(sample.Value.Uint64()))
 					} else {
-						t.metricInt64Gauge[index].Record(ctx, int64(sample.Value.Uint64()))
+						t.metricInt64Gauge[name].Record(ctx, int64(sample.Value.Uint64()))
 					}
 				case metrics.KindFloat64:
 					value := sample.Value.Float64()
 					if cumulative[name] {
 						if !math.IsNaN(value) && !math.IsInf(value, 0) {
-							t.metricFloat64Counter[index].Add(ctx, value)
+							t.metricFloat64Counter[name].Add(ctx, value)
 						}
 					} else {
 						if !math.IsNaN(value) && !math.IsInf(value, 0) {
-							t.metricFloat64Gauge[index].Record(ctx, value)
+							t.metricFloat64Gauge[name].Record(ctx, value)
 						} else {
-							t.metricFloat64Gauge[index].Record(ctx, 0)
+							t.metricFloat64Gauge[name].Record(ctx, 0)
 						}
 					}
 				case metrics.KindFloat64Histogram:
@@ -424,9 +433,9 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 							}
 						}
 						if !math.IsNaN(sum) && !math.IsInf(sum, 0) {
-							t.metricFloat64Histogram[index].Record(ctx, sum)
+							t.metricFloat64Histogram[name].Record(ctx, sum)
 						} else {
-							t.metricFloat64Histogram[index].Record(ctx, 0)
+							t.metricFloat64Histogram[name].Record(ctx, 0)
 						}
 					} else {
 						var sum float64
@@ -441,12 +450,12 @@ func (t *telemetry) CollectGoRuntimeMetrics(timeout time.Duration) Telemetry {
 						if totalCount > 0 {
 							avg := sum / float64(totalCount)
 							if !math.IsNaN(avg) && !math.IsInf(avg, 0) {
-								t.metricFloat64Histogram[index].Record(ctx, avg)
+								t.metricFloat64Histogram[name].Record(ctx, avg)
 							} else {
-								t.metricFloat64Histogram[index].Record(ctx, 0)
+								t.metricFloat64Histogram[name].Record(ctx, 0)
 							}
 						} else {
-							t.metricFloat64Histogram[index].Record(ctx, 0)
+							t.metricFloat64Histogram[name].Record(ctx, 0)
 						}
 					}
 				}
