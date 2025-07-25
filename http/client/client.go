@@ -16,27 +16,45 @@ import (
 )
 
 const (
-	defaultName                      = "Flash"
-	defaultReadTimeout               = 10 * time.Second
-	defaultWriteTimeout              = 10 * time.Second
-	defaultMaxConnDuration           = 0
-	defaultMaxIdleConnDuration       = fasthttp.DefaultMaxIdleConnDuration
-	defaultMaxIdemponentCallAttempts = fasthttp.DefaultMaxIdemponentCallAttempts
-	defaultMaxConnsPerHost           = fasthttp.DefaultMaxConnsPerHost
-	defaultReadBufferSize            = 4096
-	defaultWriteBufferSize           = 4096
+	// Client name. Used in User-Agent request header.
+	clientName = "Flash"
+
+	// Maximum number of connections per each host which may be established.
+	clientMaxConnsPerHost = 512
+
+	// Idle keep-alive connections are closed after this duration.
+	clientMaxIdleConnDuration = 10 * time.Second
+
+	// Keep-alive connections are closed after this duration.
+	clientMaxConnDuration = time.Duration(0)
+
+	// Maximum number of attempts for idempotent calls.
+	clientMaxIdemponentCallAttempts = 5
+
+	// Per-connection buffer size for responses' reading.
+	// This also limits the maximum header size.
+	clientReadBufferSize = 4096
+
+	// Per-connection buffer size for requests' writing.
+	clientWriteBufferSize = 4096
+
+	// Maximum duration for full response reading (including body).
+	clientReadTimeout = 10 * time.Second
+
+	// Maximum duration for full request writing (including body).
+	clientWriteTimeout = 10 * time.Second
 )
 
 type Client interface {
-	SetReadBufferSize(int) Client
-	SetWriteBufferSize(int) Client
-	SetMaxConnsPerHost(int) Client
-	SetName(string) Client
-	SetMaxIdemponentCallAttempts(int) Client
-	SetMaxConnDuration(time.Duration) Client
-	SetReadTimeout(time.Duration) Client
-	SetWriteTimeout(time.Duration) Client
-	SetMaxIdleConnDuration(time.Duration) Client
+	SetClientName(string) Client
+	SetClientMaxConnsPerHost(int) Client
+	SetClientMaxIdleConnDuration(time.Duration) Client
+	SetClientMaxConnDuration(time.Duration) Client
+	SetClientMaxIdemponentCallAttempts(int) Client
+	SetClientReadBufferSize(int) Client
+	SetClientWriteBufferSize(int) Client
+	SetClientReadTimeout(time.Duration) Client
+	SetClientWriteTimeout(time.Duration) Client
 	UseTelemetry(telemetry.Telemetry) Client
 	UseState(state.State) Client
 	Request(ctx context.Context, method string, url string, options ...RequestOption) (Response, error)
@@ -52,17 +70,17 @@ type client struct {
 func New() Client {
 	return &client{
 		client: &fasthttp.Client{
-			Name:                          defaultName,
-			MaxIdemponentCallAttempts:     defaultMaxIdemponentCallAttempts,
-			MaxConnDuration:               defaultMaxConnDuration,
-			ReadTimeout:                   defaultReadTimeout,
-			WriteTimeout:                  defaultWriteTimeout,
-			MaxIdleConnDuration:           defaultMaxIdleConnDuration,
-			MaxConnsPerHost:               defaultMaxConnsPerHost,
-			DisableHeaderNamesNormalizing: true, // If you set the case on your headers correctly you can enable this
+			Name:                          clientName,
+			MaxConnsPerHost:               clientMaxConnsPerHost,
+			MaxIdleConnDuration:           clientMaxIdleConnDuration,
+			MaxConnDuration:               clientMaxConnDuration,
+			MaxIdemponentCallAttempts:     clientMaxIdemponentCallAttempts,
+			ReadBufferSize:                clientReadBufferSize,
+			WriteBufferSize:               clientWriteBufferSize,
+			ReadTimeout:                   clientReadTimeout,
+			WriteTimeout:                  clientWriteTimeout,
+			DisableHeaderNamesNormalizing: true,
 			DisablePathNormalizing:        true,
-			ReadBufferSize:                defaultReadBufferSize,
-			WriteBufferSize:               defaultWriteBufferSize,
 			// increase DNS cache time to an hour instead of default minute
 			Dial: (&fasthttp.TCPDialer{
 				Concurrency:      4096,
@@ -72,48 +90,48 @@ func New() Client {
 	}
 }
 
-func (c *client) SetReadBufferSize(i int) Client {
-	c.client.ReadBufferSize = i
+func (c *client) SetClientName(v string) Client {
+	c.client.Name = v
 	return c
 }
 
-func (c *client) SetWriteBufferSize(i int) Client {
-	c.client.WriteBufferSize = i
+func (c *client) SetClientMaxConnsPerHost(v int) Client {
+	c.client.MaxConnsPerHost = v
 	return c
 }
 
-func (c *client) SetMaxConnsPerHost(i int) Client {
-	c.client.MaxConnsPerHost = i
+func (c *client) SetClientMaxIdleConnDuration(v time.Duration) Client {
+	c.client.MaxIdleConnDuration = v
 	return c
 }
 
-func (c *client) SetName(s string) Client {
-	c.client.Name = s
+func (c *client) SetClientMaxConnDuration(v time.Duration) Client {
+	c.client.MaxConnDuration = v
 	return c
 }
 
-func (c *client) SetMaxIdemponentCallAttempts(i int) Client {
-	c.client.MaxIdemponentCallAttempts = i
+func (c *client) SetClientMaxIdemponentCallAttempts(v int) Client {
+	c.client.MaxIdemponentCallAttempts = v
 	return c
 }
 
-func (c *client) SetMaxConnDuration(d time.Duration) Client {
-	c.client.MaxConnDuration = d
+func (c *client) SetClientReadBufferSize(v int) Client {
+	c.client.ReadBufferSize = v
 	return c
 }
 
-func (c *client) SetReadTimeout(d time.Duration) Client {
-	c.client.ReadTimeout = d
+func (c *client) SetClientWriteBufferSize(v int) Client {
+	c.client.WriteBufferSize = v
 	return c
 }
 
-func (c *client) SetWriteTimeout(d time.Duration) Client {
-	c.client.WriteTimeout = d
+func (c *client) SetClientReadTimeout(v time.Duration) Client {
+	c.client.ReadTimeout = v
 	return c
 }
 
-func (c *client) SetMaxIdleConnDuration(d time.Duration) Client {
-	c.client.MaxIdleConnDuration = d
+func (c *client) SetClientWriteTimeout(v time.Duration) Client {
+	c.client.WriteTimeout = v
 	return c
 }
 

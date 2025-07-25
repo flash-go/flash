@@ -37,29 +37,96 @@ var (
 )
 
 const (
-	fasthttpHttpServerLogAllErrors       = true
-	fasthttpHttpServerCloseOnShutdown    = true
-	fasthttpHttpServerConcurrency        = fasthttp.DefaultConcurrency
-	fasthttpHttpServerMaxRequestBodySize = fasthttp.DefaultMaxRequestBodySize
-	defaultServerName                    = "Flash"
-	disableLogoOnStartup                 = false
+	// Server name for sending in response headers.
+	serverName = "Flash"
+
+	// The maximum number of concurrent connections the server may serve.
+	serverConcurrency = 256 * 1024
+
+	// Per-connection buffer size for requests' reading.
+	// This also limits the maximum header size.
+	//
+	// Increase this buffer if your clients send multi-KB RequestURIs
+	// and/or multi-KB headers (for example, BIG cookies).
+	serverReadBufferSize = 4096
+
+	// Per-connection buffer size for responses writing.
+	serverWriteBufferSize = 4096
+
+	// ReadTimeout is the amount of time allowed to read
+	// the full request including body. The connection's read
+	// deadline is reset when the connection opens, or for
+	// keep-alive connections after the first byte has been read.
+	serverReadTimeout = 10 * time.Second
+
+	// WriteTimeout is the maximum duration before timing out
+	// writes of the response. It is reset after the request handler
+	// has returned.
+	serverWriteTimeout = 10 * time.Second
+
+	// IdleTimeout is the maximum amount of time to wait for the
+	// next request when keep-alive is enabled. If IdleTimeout
+	// is zero, the value of ReadTimeout is used.
+	serverIdleTimeout = 10 * time.Second
+
+	// Maximum number of concurrent client connections allowed per IP.
+	serverMaxConnsPerIP = 0 // unlimited
+
+	// Maximum number of requests served per connection.
+	//
+	// The server closes connection after the last request.
+	// 'Connection: close' header is added to the last response.
+	serverMaxRequestsPerConn = 0 // unlimited
+
+	// Maximum request body size.
+	// The server rejects requests with bodies exceeding this limit.
+	serverMaxRequestBodySize = 4 * 1024 * 1024
+
+	// Whether to disable keep-alive connections.
+	//
+	// The server will close all the incoming connections after sending
+	// the first response to client if this option is set to true.
+	serverDisableKeepalive = false
+
+	// Whether to enable tcp keep-alive connections.
+	// Whether the operating system should send tcp keep-alive messages
+	// on the tcp connection.
+	serverTCPKeepalive = false
+
+	// Logs all errors, including the most frequent
+	// 'connection reset by peer', 'broken pipe' and 'connection timeout'
+	// errors. Such errors are common in production serving real-world
+	// clients.
+	serverLogAllErrors = true
+
+	disableLogoOnStartup = false
+
 	// TODO: Add processing (graceful/forceful)
 	osSignalBuffer = 2
 )
 
 type Server interface {
-	SetErrorResponseStatusMap(*ErrorResponseStatusMap) Server
-	SetReadTimeout(time.Duration) Server
-	SetIdleTimeout(time.Duration) Server
-	SetMaxRequestBodySize(int) Server
 	SetServerName(string) Server
+	SetServerConcurrency(int) Server
+	SetServerReadBufferSize(int) Server
+	SetServerWriteBufferSize(int) Server
+	SetServerReadTimeout(time.Duration) Server
+	SetServerWriteTimeout(time.Duration) Server
+	SetServerIdleTimeout(time.Duration) Server
+	SetServerMaxConnsPerIP(int) Server
+	SetServerMaxRequestsPerConn(int) Server
+	SetServerMaxRequestBodySize(int) Server
+	SetServerDisableKeepalive(bool) Server
+	SetServerTCPKeepalive(bool) Server
+	SetServerLogAllErrors(bool) Server
+	SetErrorResponseStatusMap(*ErrorResponseStatusMap) Server
 	DisableLogo(bool) Server
 	AddRoute(method, path string, handler func(request ReqCtx), middlewares ...func(handler ReqHandler) ReqHandler) Server
-	UseState(state.State) Server
 	UseCors(Cors) Server
 	UseLogger(logger.Logger) Server
 	UseTelemetry(telemetry.Telemetry) Server
 	UseSwagger() Server
+	UseState(state.State) Server
 	UseProfiling() Server
 	SetListener(net.Listener)
 	GetListener() net.Listener
@@ -110,17 +177,23 @@ type server struct {
 func New() Server {
 	return &server{
 		server: &fasthttp.Server{
-			Name:                  defaultServerName,
-			LogAllErrors:          fasthttpHttpServerLogAllErrors,
-			Concurrency:           fasthttpHttpServerConcurrency,
-			CloseOnShutdown:       fasthttpHttpServerCloseOnShutdown,
+			Name:                  serverName,
+			Concurrency:           serverConcurrency,
+			ReadBufferSize:        serverReadBufferSize,
+			WriteBufferSize:       serverWriteBufferSize,
+			ReadTimeout:           serverReadTimeout,
+			WriteTimeout:          serverWriteTimeout,
+			IdleTimeout:           serverIdleTimeout,
+			MaxConnsPerIP:         serverMaxConnsPerIP,
+			MaxRequestsPerConn:    serverMaxRequestsPerConn,
+			MaxRequestBodySize:    serverMaxRequestBodySize,
+			DisableKeepalive:      serverDisableKeepalive,
+			TCPKeepalive:          serverTCPKeepalive,
+			LogAllErrors:          serverLogAllErrors,
+			CloseOnShutdown:       true,
 			NoDefaultServerHeader: true,
 			NoDefaultContentType:  true,
 			NoDefaultDate:         true,
-			ReadTimeout:           10 * time.Second,
-			WriteTimeout:          10 * time.Second,
-			IdleTimeout:           10 * time.Second,
-			MaxRequestBodySize:    fasthttpHttpServerMaxRequestBodySize,
 		},
 		router:      router.New(),
 		middleware:  fasthttpMiddleware{},
@@ -128,28 +201,73 @@ func New() Server {
 	}
 }
 
+func (s *server) SetServerName(v string) Server {
+	s.server.Name = v
+	return s
+}
+
+func (s *server) SetServerConcurrency(v int) Server {
+	s.server.Concurrency = v
+	return s
+}
+
+func (s *server) SetServerReadBufferSize(v int) Server {
+	s.server.ReadBufferSize = v
+	return s
+}
+
+func (s *server) SetServerWriteBufferSize(v int) Server {
+	s.server.WriteBufferSize = v
+	return s
+}
+
+func (s *server) SetServerReadTimeout(v time.Duration) Server {
+	s.server.ReadTimeout = v
+	return s
+}
+
+func (s *server) SetServerWriteTimeout(v time.Duration) Server {
+	s.server.WriteTimeout = v
+	return s
+}
+
+func (s *server) SetServerIdleTimeout(v time.Duration) Server {
+	s.server.IdleTimeout = v
+	return s
+}
+
+func (s *server) SetServerMaxConnsPerIP(v int) Server {
+	s.server.MaxConnsPerIP = v
+	return s
+}
+
+func (s *server) SetServerMaxRequestsPerConn(v int) Server {
+	s.server.MaxRequestsPerConn = v
+	return s
+}
+
+func (s *server) SetServerMaxRequestBodySize(v int) Server {
+	s.server.MaxRequestBodySize = v
+	return s
+}
+
+func (s *server) SetServerDisableKeepalive(v bool) Server {
+	s.server.DisableKeepalive = v
+	return s
+}
+
+func (s *server) SetServerTCPKeepalive(v bool) Server {
+	s.server.TCPKeepalive = v
+	return s
+}
+
+func (s *server) SetServerLogAllErrors(v bool) Server {
+	s.server.LogAllErrors = v
+	return s
+}
+
 func (s *server) SetErrorResponseStatusMap(m *ErrorResponseStatusMap) Server {
 	s.errorResponseStatusMap = m
-	return s
-}
-
-func (s *server) SetReadTimeout(d time.Duration) Server {
-	s.server.ReadTimeout = d
-	return s
-}
-
-func (s *server) SetIdleTimeout(d time.Duration) Server {
-	s.server.IdleTimeout = d
-	return s
-}
-
-func (s *server) SetMaxRequestBodySize(b int) Server {
-	s.server.MaxRequestBodySize = b
-	return s
-}
-
-func (s *server) SetServerName(name string) Server {
-	s.server.Name = name
 	return s
 }
 
@@ -353,7 +471,7 @@ func (s *server) DeregisterService() error {
 		return errors.New("state not set")
 	}
 	return s.state.ServiceDeregister(
-		s.getInstanceId(),
+		s.instanceId,
 	)
 }
 
@@ -433,10 +551,6 @@ func (s *server) wrapCtx(handler ReqHandler) fasthttp.RequestHandler {
 
 func (s *server) appendMiddleware(fn func(handler fasthttp.RequestHandler) fasthttp.RequestHandler) {
 	s.middleware = append(s.middleware, fn)
-}
-
-func (s *server) getInstanceId() string {
-	return s.instanceId
 }
 
 func (s *server) setInstanceId(service, hostname string, port int) string {
@@ -529,33 +643,34 @@ func (ctx *reqCtx) GetBearerToken() (string, error) {
 }
 
 func (ctx *reqCtx) Error(msg string, statusCode int) {
-	ctx.RequestCtx.Error(msg, statusCode)
+	ctx.SetTraceIdHeader()
+	ctx.SetStatusCode(statusCode)
+	ctx.SetContentTypeBytes([]byte("text/plain; charset=utf-8"))
+	ctx.SetBodyString(msg)
 }
 
 func (ctx *reqCtx) Write(p []byte) (int, error) {
-	// Set trace id header
-	spanCtx := trace.SpanContextFromContext(ctx.Context())
-	if spanCtx.HasTraceID() {
-		ctx.Response.Header.Set("X-Trace-Id", spanCtx.TraceID().String())
-	}
-
+	ctx.SetTraceIdHeader()
 	return ctx.RequestCtx.Write(p)
 }
 
 func (ctx *reqCtx) WriteString(s string) (int, error) {
+	ctx.SetTraceIdHeader()
 	return ctx.RequestCtx.WriteString(s)
 }
 
 func (ctx *reqCtx) WriteJson(data any) error {
-	ctx.SetContentType("application/json")
+	ctx.SetContentTypeBytes([]byte("application/json; charset=utf-8"))
+	ctx.SetTraceIdHeader()
 	return json.NewEncoder(ctx).Encode(data)
 }
 
 func (ctx *reqCtx) WriteResponse(statusCode int, data any) error {
-	// Set response status code
 	ctx.SetStatusCode(statusCode)
-
-	// Write json response data
+	if data == nil {
+		ctx.SetTraceIdHeader()
+		return nil
+	}
 	return ctx.WriteJson(data)
 }
 
@@ -592,6 +707,13 @@ func (ctx *reqCtx) WriteErrorResponse(err error) {
 
 	// Write error response
 	ctx.Error(msg, statusCode)
+}
+
+func (ctx *reqCtx) SetTraceIdHeader() {
+	spanCtx := trace.SpanContextFromContext(ctx.Context())
+	if spanCtx.HasTraceID() {
+		ctx.Response.Header.Set("X-Trace-Id", spanCtx.TraceID().String())
+	}
 }
 
 type Cors struct {

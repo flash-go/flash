@@ -10,7 +10,7 @@ import (
 const loggerDefaultLevel = zerolog.InfoLevel
 
 type Logger interface {
-	SetLevel(level zerolog.Level) Logger
+	SetLevel(level int) Logger
 	Log() *zerolog.Logger
 	Printf(format string, args ...any)
 }
@@ -26,8 +26,8 @@ func New(writer io.Writer) Logger {
 	return &logger{zerolog.New(writer).With().Timestamp().Logger()}
 }
 
-func (l *logger) SetLevel(level zerolog.Level) Logger {
-	zerolog.SetGlobalLevel(level)
+func (l *logger) SetLevel(level int) Logger {
+	zerolog.SetGlobalLevel(zerolog.Level(level))
 	return l
 }
 
