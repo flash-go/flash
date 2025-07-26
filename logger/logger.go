@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"errors"
 	"io"
 
 	"github.com/rs/zerolog"
@@ -10,7 +11,7 @@ import (
 const loggerDefaultLevel = zerolog.InfoLevel
 
 type Logger interface {
-	SetLevel(level int) Logger
+	SetLevel(level int) error
 	Log() *zerolog.Logger
 	Printf(format string, args ...any)
 }
@@ -26,9 +27,12 @@ func New(writer io.Writer) Logger {
 	return &logger{zerolog.New(writer).With().Timestamp().Logger()}
 }
 
-func (l *logger) SetLevel(level int) Logger {
+func (l *logger) SetLevel(level int) error {
+	if level < -1 || level > 7 {
+		return errors.New("invalid log level")
+	}
 	zerolog.SetGlobalLevel(zerolog.Level(level))
-	return l
+	return nil
 }
 
 func (l *logger) Log() *zerolog.Logger {
