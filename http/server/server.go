@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net"
 	"os"
 	"os/signal"
@@ -156,6 +157,9 @@ type ReqCtx interface {
 	WriteJson(any) error
 	WriteResponse(statusCode int, data any) error
 	WriteErrorResponse(err error)
+	SetTraceIdHeader()
+	FormFile(key string) (*multipart.FileHeader, error)
+	FormValue(key string) []byte
 }
 
 type ErrorResponseStatusMap map[error]int
@@ -714,6 +718,14 @@ func (ctx *reqCtx) SetTraceIdHeader() {
 	if spanCtx.HasTraceID() {
 		ctx.Response.Header.Set("X-Trace-Id", spanCtx.TraceID().String())
 	}
+}
+
+func (ctx *reqCtx) FormFile(key string) (*multipart.FileHeader, error) {
+	return ctx.RequestCtx.FormFile(key)
+}
+
+func (ctx *reqCtx) FormValue(key string) []byte {
+	return ctx.RequestCtx.FormValue(key)
 }
 
 type Cors struct {
