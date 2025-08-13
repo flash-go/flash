@@ -34,7 +34,7 @@ var startupLogo string
 
 var (
 	defaultErrorResponseStatus = 503
-	defaultErrorResponseMsg    = "internal:service_unavailable"
+	defaultErrorResponseMsg    = "service_unavailable"
 )
 
 const (
