@@ -142,6 +142,8 @@ type Server interface {
 
 type ReqCtx interface {
 	Request() *fasthttp.Request
+	RemoteAddr() net.Addr
+	UserAgent() string
 	ReadJson(any) error
 	Body() []byte
 	SetContentType(string)
@@ -151,6 +153,7 @@ type ReqCtx interface {
 	UserValue(key any) any
 	Context() context.Context
 	GetBearerToken() (string, error)
+	GetIpAddr() string
 	Error(msg string, statusCode int)
 	Write([]byte) (int, error)
 	WriteString(string) (int, error)
@@ -593,6 +596,14 @@ func (ctx *reqCtx) Request() *fasthttp.Request {
 	return &ctx.RequestCtx.Request
 }
 
+func (ctx *reqCtx) RemoteAddr() net.Addr {
+	return ctx.RequestCtx.Response.RemoteAddr()
+}
+
+func (ctx *reqCtx) UserAgent() string {
+	return string(ctx.RequestCtx.Request.Header.UserAgent())
+}
+
 func (ctx *reqCtx) ReadJson(data any) error {
 	return json.Unmarshal(ctx.RequestCtx.Request.Body(), data)
 }
@@ -644,6 +655,22 @@ func (ctx *reqCtx) GetBearerToken() (string, error) {
 	token := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer"))
 
 	return token, nil
+}
+
+func (ctx *reqCtx) GetIpAddr() string {
+	ip := string(ctx.GetHeader("X-Real-IP"))
+	if ip == "" {
+		ip = string(ctx.GetHeader("X-Forwarded-For"))
+	}
+	if ip == "" {
+		if addr := ctx.RemoteAddr(); addr != nil {
+			ip = addr.String()
+			if host, _, err := net.SplitHostPort(ip); err == nil {
+				ip = host
+			}
+		}
+	}
+	return ip
 }
 
 func (ctx *reqCtx) Error(msg string, statusCode int) {
