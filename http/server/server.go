@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -150,7 +151,10 @@ type ReqCtx interface {
 	SetStatusCode(int)
 	SetUserValue(key any, value any)
 	GetHeader(key string) string
+	GetJsonBody() any
 	UserValue(key any) any
+	UserValueStr(key any) string
+	UserValueUint64(key any) (uint64, error)
 	Context() context.Context
 	GetBearerToken() (string, error)
 	GetIpAddr() string
@@ -628,8 +632,20 @@ func (ctx *reqCtx) GetHeader(key string) string {
 	return string(ctx.Request().Header.Peek(key))
 }
 
+func (ctx *reqCtx) GetJsonBody() any {
+	return ctx.RequestCtx.UserValue("body")
+}
+
 func (ctx *reqCtx) UserValue(key any) any {
 	return ctx.RequestCtx.UserValue(key)
+}
+
+func (ctx *reqCtx) UserValueStr(key any) string {
+	return ctx.RequestCtx.UserValue(key).(string)
+}
+
+func (ctx *reqCtx) UserValueUint64(key any) (uint64, error) {
+	return strconv.ParseUint(ctx.UserValue(key).(string), 10, 64)
 }
 
 func (ctx *reqCtx) Context() context.Context {
